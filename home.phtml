@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>Lab 3</title>
+	<style>
+		.title {
+			display: inline-block;
+			font-weight: bold;
+			margin-bottom: 5px;
+		}
+		form {
+			margin-bottom: 20px;
+		}
+		.queryParam {
+			font-weight: bold;
+		}
+		.no-display {
+			display: none;
+		}
+	</style>
+</head>
+
+<body>
+	<?php
+		isConnectionSet($dbh);
+	?>
+
+	<span class="title">Вывести список компьютеров с центральным процессором</span><span> (return JSON)</span>
+	<form action="/handler/cpu" method="get" data-type="cpu">
+		<select name="cpuList">
+			<?php
+				include_once "lists/cpu.php";
+			?>
+		</select>
+		<input type="submit" name="getBtn" value="Ok">
+	</form>
+
+	<span class="title">Вывести список компьютеров с установленным ПО</span><span> (return HTML)</span>
+	<form action="/handler/software" method="get" data-type="software">
+		<select name="softwareList">
+			<?php
+				include_once "lists/software.php";
+			?>
+		</select>
+		<input type="submit" name="getBtn" value="Ok">
+	</form>
+
+	<span class="title">Вывести список компьютеров с истёкшим гарантийным сроком</span><span> (return XML)</span>
+	<form action="/handler/guarantee" method="get" data-type="guarantee">
+		<label>Выберите дату: <input type="date" name="guaranteeDate" min="2015-01-01" max="2025-12-31" value="2022-05-16"></label>
+		<input type="submit" name="getBtn" value="Ok">
+	</form>
+
+<div id="results" class="no-display"></div>
+
+<script>
+	let results;
+
+	window.onload = function() {
+		results = document.getElementById('results');
+		init(results);
+
+		let forms = document.querySelectorAll('form');
+		Array.from(forms).forEach(form => {
+			form.addEventListener('submit', formSubmitHandler);
+		});
+	}
+
+	function init(parent) {
+		let header = document.createElement('header');
+		header.innerHTML = "<p>Results for: <span class=\"queryParam\"></span></p>";
+
+		let section = document.createElement('section');
+		section.className = "queryResult";
+
+		parent.append(header);
+		parent.append(section);
+	}
+
+	function formSubmitHandler(event) {
+		event.preventDefault();
+
+		let params = {};
+
+		params[event.target[0].name] = event.target[0].value;
+		params[event.target[1].name] = event.target[1].value;
+
+		let url = new URL(event.target.action);
+		url.search = new URLSearchParams(params);
+
+		let options = {
+			method: 'GET'
+		}
+
+		switch (event.target.dataset.type) {
+			case 'cpu':
+				fetch(url, options).then(response => {
+					if (response.ok) {
+						return response.json();
+					}
+					else {
+						alert("Ошибка HTTP: " + response.status);
+					}
+				}).then(json => {
+					let html = data2html(json);
+					let title = getTitleByList(event.target[0]);
+					print(title, html);
+				});
+				break;
+			case 'software':
+				fetch(url, options).then(response => {
+					if (response.ok) {
+						return response.text();
+					}
+					else {
+						alert("Ошибка HTTP: " + response.status);
+					}
+				}).then(text => {
+					let title = getTitleByList(event.target[0]);
+					print(title, text);
+				});
+				break;
+			case 'guarantee':
+				let request = new XMLHttpRequest();
+				request.open('GET', url, true);
+				request.responseType = 'document';
+				request.overrideMimeType('application/xml');
+
+				request.onload = function() {
+					if (this.readyState === this.DONE) {
+						if (this.status === 200) {
+							let dataNode = this.responseXML.getElementsByTagName("data")[0];
+							let itemNodes = dataNode.childNodes;
+							let arr = new Array();
+
+							Array.from(itemNodes).forEach(node => {
+								let item = new Array();
+								Array.from(node.childNodes).forEach(param => {
+									item[param.tagName] = param.textContent;
+								});
+								arr.push(item);
+							});
+
+							let html = data2html(arr, true);
+							let d = event.target[0].valueAsDate;
+							let title = `${("0" + d.getDate()).slice(-2)}.${("0"+(d.getMonth()+1)).slice(-2)}.${d.getFullYear()}`;
+							print(title, html);
+						}
+						else {
+							alert("Ошибка HTTP: " + this.status);
+						}
+					}
+				};
+
+				request.send();
+				break;
+		}
+	}
+
+	function data2html(data, isGuaranteeExpired = false) {
+		let html = "";
+		let openTag = "";
+		let closeTag = "";
+
+		if (isGuaranteeExpired) {
+			openTag = '<span style="color: red;">';
+			closeTag = ' <b>Срок гарантии истёк!</b></span>';
+		}
+
+		if (Array.isArray(data)) {
+			data.forEach(element => {
+				html += `<p><b>${element.name}</b><br>Процессор: ${element.processor} (${element.frequency} ГГц)<br>Материнская плата: ${element.motherboard}<br>Внутренний накопитель: ${element.hdd_capacity} ГБ<br>Оперативная память: ${element.ram_capacity} ГБ<br>Дата покупки: ${element.purchase}<br>Дата истечения гарантийного срока: ${openTag}${element.guarantee} (${element.guaranteePeriod} года)${closeTag}</p>`;
+			});
+		}
+		else {
+			html = `<p><b>${data.name}</b><br>Процессор: ${data.processor} (${data.frequency} ГГц)<br>Материнская плата: ${data.motherboard}<br>Внутренний накопитель: ${data.hdd_capacity} ГБ<br>Оперативная память: ${data.ram_capacity} ГБ<br>Дата покупки: ${data.purchase}<br>Дата истечения гарантийного срока: ${openTag}${element.guarantee} (${element.guaranteePeriod} года)${closeTag}</p>`;
+		}
+
+		return html;
+	}
+
+	function getTitleByList(list) {
+		return list.options[list.selectedIndex].text;
+	}
+
+	function print(title, html) {
+		results.classList.remove('no-display');
+		results.querySelector(".queryParam").innerHTML = title;
+		results.querySelector(".queryResult").innerHTML = html;
+	}
+</script>
+</body>
+</html>
